@@ -1,0 +1,41 @@
+/* Reset básico */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+
+/* Permite scroll vertical en toda la página */
+html, body {
+  height: auto;           /* evita “altura fija” que bloquea scroll */
+  min-height: 100%;       /* aún ocupa toda la pantalla como mínimo */
+  overflow-y: auto;       /* <- fuerza scroll si el contenido crece */
+}
+
+/* Raíz del app ocupa la vista y deja scrollear */
+#root {
+  min-height: 100vh;
+  overflow: visible;      /* no ocultes nada dentro del root */
+}
+
+/* Layout del contenido */
+.container {
+  max-width: 920px;
+  margin: 32px auto;
+  padding: 16px;
+}
+
+/* Asegura que los web components tengan caja visible */
+face-capture,
+face-liveness {
+  display: block;
+  width: 100%;
+  min-height: 520px;
+}
+
+body, #root, .container { overflow-y: auto !important; }
+
+face-capture {
+  pointer-events: auto;
+}
+
+face-liveness {
+  pointer-events: auto;
+}
