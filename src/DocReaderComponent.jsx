@@ -1,10 +1,9 @@
-// DocReaderComponent.jsx (sin exponer licencia en el front)
-import { useEffect, useState } from "react";
-import * as DocReader from "@regulaforensics/document-reader-webclient";
+import { useEffect, useRef, useState } from "react";
 
-const DOC_BACKEND_URL = "http://localhost:4000/api/doc"; // 👈 tu backend proxy
+const DOC_BACKEND_URL = "http://localhost:4000/api/doc"; // tu backend proxy
 
 export default function DocReaderComponent() {
+  const apiRef = useRef({ initialize: null, startScanner: null });
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
@@ -13,12 +12,30 @@ export default function DocReaderComponent() {
   useEffect(() => {
     (async () => {
       try {
-        // ✅ Inicializa apuntando a TU backend (que a su vez tiene la licencia en el servicio DocReader)
-        await DocReader.initialize({
-          url: DOC_BACKEND_URL, // No pasamos license aquí
-          // Puedes setear idioma/UI por acá si tu versión lo soporta:
-          // locale: "es",
+        // Carga dinámica para evitar problemas de SSR/bundling
+        const mod = await import("@regulaforensics/document-reader-webclient");
+
+        // Compatibilidad: nombrados o default
+        const initialize =
+          mod?.initialize || mod?.default?.initialize || null;
+        const startScanner =
+          mod?.startScanner || mod?.default?.startScanner || null;
+
+        if (!initialize || !startScanner) {
+          console.error("WebClient module shape:", mod);
+          throw new Error(
+            "El WebClient no expone initialize/startScanner (ver consola)."
+          );
+        }
+
+        apiRef.current = { initialize, startScanner };
+
+        // Inicializa apuntando a TU backend proxy (la licencia vive en el DocReader API)
+        await initialize({
+          url: DOC_BACKEND_URL,
+          // locale: "es", // si tu versión lo admite aquí
         });
+
         setReady(true);
       } catch (e) {
         console.error("DocReader init error:", e);
@@ -33,10 +50,9 @@ export default function DocReaderComponent() {
       setResult(null);
       setError("");
 
-      // Escenario típico; ajusta según lo que quieras probar:
-      const resp = await DocReader.startScanner({
-        scenario: "MrzAndLocate",  // Alternativas: "FullProcess", "Mrz", "Barcode", etc.
-        // Puedes agregar más params si los necesitas (quality, timeouts, etc.)
+      const { startScanner } = apiRef.current;
+      const resp = await startScanner({
+        scenario: "MrzAndLocate", // o "FullProcess", "Mrz", "Barcode", etc.
       });
 
       console.log("DocReader response:", resp);
@@ -55,21 +71,19 @@ export default function DocReaderComponent() {
         <h2>Documento de identidad</h2>
         <p style={{ color: "#b00" }}>Error: {error}</p>
         <p style={{ opacity: 0.7 }}>
-          Revisa que tu backend proxy esté activo en <code>{DOC_BACKEND_URL}</code> y que la
-          <b> Document Reader API</b> tenga licencia válida.
+          Verifica que el backend proxy esté activo en{" "}
+          <code>{DOC_BACKEND_URL}</code> y que la <b>Document Reader API</b>{" "}
+          tenga licencia válida.
         </p>
       </div>
     );
   }
 
-  if (!ready) {
-    return <p style={{ padding: 16 }}>Cargando Document Reader…</p>;
-  }
+  if (!ready) return <p style={{ padding: 16 }}>Cargando Document Reader…</p>;
 
   return (
     <div style={{ padding: 16 }}>
       <h2>Documento de identidad</h2>
-
       <button
         onClick={start}
         disabled={running}
@@ -79,7 +93,7 @@ export default function DocReaderComponent() {
           border: "none",
           background: running ? "#9aa0a6" : "#7b61ff",
           color: "#fff",
-          cursor: running ? "not-allowed" : "pointer"
+          cursor: running ? "not-allowed" : "pointer",
         }}
       >
         {running ? "Escaneando…" : "Escanear documento"}
@@ -96,7 +110,7 @@ export default function DocReaderComponent() {
               padding: 12,
               borderRadius: 8,
               maxHeight: 360,
-              overflow: "auto"
+              overflow: "auto",
             }}
           >
 {JSON.stringify(result, null, 2)}
