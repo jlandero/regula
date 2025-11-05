@@ -1,20 +1,29 @@
-// DocReaderComponent.jsx — usa UMD global, sin imports del paquete
+// DocReaderComponent.jsx — 8.3.537 usando el paquete raíz (sin subpaths)
 import { useEffect, useRef, useState } from "react";
 
 const DOC_BACKEND_URL = "http://localhost:4000/api/doc"; // tu backend proxy
-const UMD_CDN =
-  "https://cdn.jsdelivr.net/npm/@regulaforensics/document-reader-webclient@8.3.537/dist/webclient.umd.js";
 
-function loadScriptOnce(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) return resolve();
-    const s = document.createElement("script");
-    s.src = src;
-    s.async = true;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
-    document.head.appendChild(s);
-  });
+// Busca recursivamente un objeto que tenga init+start (nombres posibles)
+function deepFindAPI(root) {
+  const seen = new Set();
+  const initNames  = ["initialize", "init", "setup", "create"];
+  const startNames = ["startScanner", "startScan", "start", "scan", "run"];
+
+  function walk(obj) {
+    if (!obj || typeof obj !== "object" || seen.has(obj)) return null;
+    seen.add(obj);
+
+    const init = initNames.map(n => (typeof obj[n] === "function" ? obj[n] : null)).find(Boolean);
+    const start = startNames.map(n => (typeof obj[n] === "function" ? obj[n] : null)).find(Boolean);
+    if (init && start) return { initialize: init.bind(obj), startScanner: start.bind(obj) };
+
+    for (const k of Object.keys(obj)) {
+      const found = walk(obj[k]);
+      if (found) return found;
+    }
+    return null;
+  }
+  return walk(root);
 }
 
 export default function DocReaderComponent() {
@@ -27,42 +36,54 @@ export default function DocReaderComponent() {
   useEffect(() => {
     (async () => {
       try {
-        // 1) Cargar UMD pinneado a 8.3.537 (evitamos latest)
-        await loadScriptOnce(UMD_CDN);
-
-        // 2) Tomar la API del global expuesto por el UMD (8.3.x)
-        const candidates = [
-          window.DocumentReader,
-          window.RegulaDocumentReader,
-          window.Regula?.DocumentReader,
-        ].filter(Boolean);
+        // 1) Import dinámico del paquete raíz (evita subpaths que Vite no resuelve)
+        const mod = await import("@regulaforensics/document-reader-webclient");
+        // Probamos varias formas comunes: named, default, objetos anidados
+        const candidates = [mod, mod?.default].filter(Boolean);
 
         let api = null;
+
+        // a) ¿Vienen las funciones planas?
         for (const c of candidates) {
-          const init =
-            c && typeof c.initialize === "function" ? c.initialize : null;
-          const start =
-            c && typeof c.startScanner === "function"
-              ? c.startScanner
-              : c && typeof c.startScan === "function"
-              ? c.startScan
-              : null;
-          if (init && start) {
-            api = { initialize: init, startScanner: start };
+          if (typeof c?.initialize === "function" && typeof c?.startScanner === "function") {
+            api = { initialize: c.initialize, startScanner: c.startScanner };
             break;
           }
         }
+
+        // b) ¿Vienen dentro de alguna propiedad (shape distinto)?
         if (!api) {
-          throw new Error(
-            "No encontré initialize/startScanner en el global del UMD 8.3.537"
-          );
+          for (const c of candidates) {
+            const found = deepFindAPI(c);
+            if (found) { api = found; break; }
+          }
         }
+
+        // c) ¿El default es una fábrica que devuelve la API?
+        if (!api && typeof mod?.default === "function") {
+          const maybe = mod.default({ url: DOC_BACKEND_URL });
+          if (maybe && typeof maybe.then === "function") {
+            const resolved = await maybe; // por si es async factory
+            const found = deepFindAPI(resolved) || (typeof resolved?.initialize === "function" && typeof resolved?.startScanner === "function" ? resolved : null);
+            if (found) api = found;
+          } else {
+            const found = deepFindAPI(maybe) || (typeof maybe?.initialize === "function" && typeof maybe?.startScanner === "function" ? maybe : null);
+            if (found) api = found;
+          }
+        }
+
+        if (!api) {
+          console.log("[DocReader] keys mod:", Object.keys(mod || {}));
+          console.log("[DocReader] keys default:", mod?.default && Object.keys(mod.default));
+          throw new Error("No encontré initialize/startScanner en @regulaforensics/document-reader-webclient@8.3.537");
+        }
+
         apiRef.current = api;
 
-        // 3) Inicializar apuntando a TU backend proxy (la licencia vive en DocReader API)
+        // 2) Inicializa contra TU backend (la licencia está en el servicio)
         await api.initialize({
           url: DOC_BACKEND_URL,
-          // locale: "es", // si tu build lo soporta
+          // locale: "es", // si tu build lo soporta aquí
         });
 
         setReady(true);
@@ -80,7 +101,7 @@ export default function DocReaderComponent() {
       setError("");
 
       const resp = await apiRef.current.startScanner({
-        scenario: "MrzAndLocate", // "FullProcess" para lectura completa
+        scenario: "MrzAndLocate", // o "FullProcess" si quieres lectura completa
       });
 
       console.log("DocReader response:", resp);
@@ -99,8 +120,7 @@ export default function DocReaderComponent() {
         <h2>Documento de identidad</h2>
         <p style={{ color: "#b00" }}>Error: {error}</p>
         <p style={{ opacity: 0.7 }}>
-          Verifica que el backend proxy esté activo en{" "}
-          <code>{DOC_BACKEND_URL}</code> y que tu <b>Document Reader API</b> tenga licencia válida.
+          Verifica que el backend proxy esté activo en <code>{DOC_BACKEND_URL}</code> y que tu <b>Document Reader API</b> tenga licencia válida.
         </p>
       </div>
     );
