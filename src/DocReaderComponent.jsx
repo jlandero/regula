@@ -1,105 +1,108 @@
-import { useEffect, useRef, useState } from "react";
+// DocReaderComponent.jsx (sin exponer licencia en el front)
+import { useEffect, useState } from "react";
+import * as DocReader from "@regulaforensics/document-reader-webclient";
 
-// ⚠️ Pega aquí tu licencia DEV en Base64.
-// Si la dejas vacía, el SDK no va a inicializar la cámara.
-const LICENSE_BASE64 = ""; // <-- pega tu licencia aquí
-
-const DOC_CDN = "https://unpkg.com/@regulaforensics/vp-frontend-document-components@latest/dist/main.iife.js";
-
-async function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) return resolve();
-    const s = document.createElement("script");
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = (e) => reject(new Error(`No se pudo cargar ${src}`));
-    document.head.appendChild(s);
-  });
-}
+const DOC_BACKEND_URL = "http://localhost:4000/api/doc"; // 👈 tu backend proxy
 
 export default function DocReaderComponent() {
-  const ref = useRef(null);
-  const [step, setStep] = useState("boot"); // boot | defined | initialized | ready | error
+  const [ready, setReady] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     (async () => {
       try {
-        // 1) Cargar bundle
-        await loadScript(DOC_CDN);
-
-        // 2) Verificar APIs globales del bundle
-        const { defineComponents, DocumentReaderService } = window;
-        if (!defineComponents || !DocumentReaderService) {
-          throw new Error("El bundle no expuso defineComponents / DocumentReaderService.");
-        }
-
-        // 3) Definir custom elements
-        await defineComponents();
-        setStep("defined");
-
-        // 4) Inicializar service con licencia
-        const svc = new DocumentReaderService();
-        if (!LICENSE_BASE64) {
-          // Sin licencia: no se podrá abrir la cámara (te mostramos aviso)
-          setStep("initialized"); // marcamos como siguiente paso para mostrar el componente con aviso
-        } else {
-          await svc.initialize({ license: LICENSE_BASE64 });
-          setStep("initialized");
-        }
-        // Guardar referencia global por si quieres usarla luego
-        window.RegulaDocumentSDK = svc;
-
-        // 5) Esperar a que el custom element exista
-        await customElements.whenDefined("document-reader");
-
-        // 6) Configurar el componente
-        const el = ref.current;
-        if (!el) throw new Error("No se encontró el <document-reader> en el DOM.");
-
-        el.settings = {
-          startScreen: true,
-          finishScreen: false,
-          // Cuando conectes backend: escenario recomendado, p.e.:
-          // scenario: "MrzAndLocate",
-        };
-
-        setStep("ready");
-      } catch (err) {
-        console.error("[DocReader boot error]", err);
-        setError(String(err?.message || err));
-        setStep("error");
+        // ✅ Inicializa apuntando a TU backend (que a su vez tiene la licencia en el servicio DocReader)
+        await DocReader.initialize({
+          url: DOC_BACKEND_URL, // No pasamos license aquí
+          // Puedes setear idioma/UI por acá si tu versión lo soporta:
+          // locale: "es",
+        });
+        setReady(true);
+      } catch (e) {
+        console.error("DocReader init error:", e);
+        setError(String(e?.message || e));
       }
     })();
   }, []);
 
-  if (step === "boot") return <p>Cargando módulo de documento…</p>;
-  if (step === "defined" && !LICENSE_BASE64)
+  const start = async () => {
+    try {
+      setRunning(true);
+      setResult(null);
+      setError("");
+
+      // Escenario típico; ajusta según lo que quieras probar:
+      const resp = await DocReader.startScanner({
+        scenario: "MrzAndLocate",  // Alternativas: "FullProcess", "Mrz", "Barcode", etc.
+        // Puedes agregar más params si los necesitas (quality, timeouts, etc.)
+      });
+
+      console.log("DocReader response:", resp);
+      setResult(resp);
+    } catch (e) {
+      console.error("DocReader scan error:", e);
+      setError(String(e?.message || e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (error) {
     return (
-      <>
-        <p style={{ color: "#b25" }}>
-          Falta licencia DEV para inicializar el lector.
-          Pega tu <code>LICENSE_BASE64</code> en <code>DocReaderComponent.jsx</code>.
+      <div style={{ padding: 16 }}>
+        <h2>Documento de identidad</h2>
+        <p style={{ color: "#b00" }}>Error: {error}</p>
+        <p style={{ opacity: 0.7 }}>
+          Revisa que tu backend proxy esté activo en <code>{DOC_BACKEND_URL}</code> y que la
+          <b> Document Reader API</b> tenga licencia válida.
         </p>
-        <document-reader ref={ref} style={{ display:"block", width:"100%", minHeight:420, border:"1px solid #ccc" }} />
-      </>
+      </div>
     );
-  if (step === "initialized" && !LICENSE_BASE64)
-    return (
-      <>
-        <p style={{ color: "#b25" }}>
-          Sin licencia, el componente no abrirá la cámara.
-          Agrega la licencia y recarga.
-        </p>
-        <document-reader ref={ref} style={{ display:"block", width:"100%", minHeight:420, border:"1px solid #ccc" }} />
-      </>
-    );
-  if (step === "error") return <p style={{ color: "#b00" }}>Error: {error}</p>;
+  }
+
+  if (!ready) {
+    return <p style={{ padding: 16 }}>Cargando Document Reader…</p>;
+  }
 
   return (
-    <document-reader
-      ref={ref}
-      style={{ display:"block", width:"100%", minHeight:420, border:"1px solid #ccc", borderRadius:8 }}
-    />
+    <div style={{ padding: 16 }}>
+      <h2>Documento de identidad</h2>
+
+      <button
+        onClick={start}
+        disabled={running}
+        style={{
+          padding: "10px 14px",
+          borderRadius: 8,
+          border: "none",
+          background: running ? "#9aa0a6" : "#7b61ff",
+          color: "#fff",
+          cursor: running ? "not-allowed" : "pointer"
+        }}
+      >
+        {running ? "Escaneando…" : "Escanear documento"}
+      </button>
+
+      {result && (
+        <>
+          <p style={{ marginTop: 12 }}>Resultado (JSON):</p>
+          <pre
+            style={{
+              marginTop: 8,
+              background: "#111",
+              color: "#0f0",
+              padding: 12,
+              borderRadius: 8,
+              maxHeight: 360,
+              overflow: "auto"
+            }}
+          >
+{JSON.stringify(result, null, 2)}
+          </pre>
+        </>
+      )}
+    </div>
   );
 }
