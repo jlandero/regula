@@ -1,14 +1,16 @@
-// DocReaderComponent.jsx — fijado a WebClient UMD 8.3.537
+// DocReaderComponent.jsx — usa UMD global, sin imports del paquete
 import { useEffect, useRef, useState } from "react";
 
 const DOC_BACKEND_URL = "http://localhost:4000/api/doc"; // tu backend proxy
-const UMD_CDN = "https://cdn.jsdelivr.net/npm/@regulaforensics/document-reader-webclient@8.3.537/dist/webclient.umd.js";
+const UMD_CDN =
+  "https://cdn.jsdelivr.net/npm/@regulaforensics/document-reader-webclient@8.3.537/dist/webclient.umd.js";
 
-function loadScript(src) {
+function loadScriptOnce(src) {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) return resolve();
     const s = document.createElement("script");
     s.src = src;
+    s.async = true;
     s.onload = resolve;
     s.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
     document.head.appendChild(s);
@@ -25,11 +27,10 @@ export default function DocReaderComponent() {
   useEffect(() => {
     (async () => {
       try {
-        // 1) Cargar UMD pinneado a 8.3.537
-        await loadScript(UMD_CDN);
+        // 1) Cargar UMD pinneado a 8.3.537 (evitamos latest)
+        await loadScriptOnce(UMD_CDN);
 
-        // 2) Localizar el global que expone initialize/startScanner
-        // (en 8.3.x suele ser window.DocumentReader o window.RegulaDocumentReader)
+        // 2) Tomar la API del global expuesto por el UMD (8.3.x)
         const candidates = [
           window.DocumentReader,
           window.RegulaDocumentReader,
@@ -38,26 +39,30 @@ export default function DocReaderComponent() {
 
         let api = null;
         for (const c of candidates) {
-          if (!c) continue;
-          const init = typeof c.initialize === "function" ? c.initialize : null;
-          const start = typeof c.startScanner === "function" ? c.startScanner
-                      : typeof c.startScan === "function" ? c.startScan
-                      : null;
+          const init =
+            c && typeof c.initialize === "function" ? c.initialize : null;
+          const start =
+            c && typeof c.startScanner === "function"
+              ? c.startScanner
+              : c && typeof c.startScan === "function"
+              ? c.startScan
+              : null;
           if (init && start) {
             api = { initialize: init, startScanner: start };
             break;
           }
         }
-
         if (!api) {
-          throw new Error("No encontré initialize/startScanner en el global del UMD 8.3.537");
+          throw new Error(
+            "No encontré initialize/startScanner en el global del UMD 8.3.537"
+          );
         }
         apiRef.current = api;
 
-        // 3) Inicializar apuntando a tu backend proxy (la licencia vive en DocReader API)
+        // 3) Inicializar apuntando a TU backend proxy (la licencia vive en DocReader API)
         await api.initialize({
           url: DOC_BACKEND_URL,
-          // locale: "es" // si tu build lo soporta aquí
+          // locale: "es", // si tu build lo soporta
         });
 
         setReady(true);
@@ -75,7 +80,7 @@ export default function DocReaderComponent() {
       setError("");
 
       const resp = await apiRef.current.startScanner({
-        scenario: "MrzAndLocate", // o "FullProcess" para lectura completa
+        scenario: "MrzAndLocate", // "FullProcess" para lectura completa
       });
 
       console.log("DocReader response:", resp);
@@ -94,7 +99,8 @@ export default function DocReaderComponent() {
         <h2>Documento de identidad</h2>
         <p style={{ color: "#b00" }}>Error: {error}</p>
         <p style={{ opacity: 0.7 }}>
-          Verifica que el backend proxy esté activo en <code>{DOC_BACKEND_URL}</code> y que la <b>Document Reader API</b> tenga licencia válida.
+          Verifica que el backend proxy esté activo en{" "}
+          <code>{DOC_BACKEND_URL}</code> y que tu <b>Document Reader API</b> tenga licencia válida.
         </p>
       </div>
     );
