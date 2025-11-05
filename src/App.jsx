@@ -1,9 +1,9 @@
+// App.jsx
 import { useState, useEffect, useRef } from "react";
 import DocReaderComponent from "./DocReaderComponent";
 
-
 export default function App() {
-  const [modo, setModo] = useState("selfie"); // 'selfie' o 'liveness'
+  const [modo, setModo] = useState("selfie"); // 'selfie' | 'liveness' | 'document'
   const capRef = useRef(null);
   const livRef = useRef(null);
 
@@ -15,80 +15,97 @@ export default function App() {
   useEffect(() => {
     const theme = {
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-      fontSize: '14px',
-      onboardingScreenStartButtonTitle: '#ffffff',
-      onboardingScreenStartButtonBackground: '#7cccc',
-      onboardingScreenStartButtonBackgroundHover: '#6a54ee',
-      onboardingScreenStartButtonTitleHover: '#ffffff',
-      cameraScreenFrontHintLabelBackground: '#111827',
-      cameraScreenFrontHintLabelText: '#ffffff',
-      cameraScreenStrokeNormal: '#7b61ff',
-      cameraScreenSectorActive: '#22c55e',
-      cameraScreenSectorTarget: '#93c5fd',
-      processingScreenProgress: '#7b61ff',
-      retryScreenRetryButtonBackground: '#ef4444',
-      retryScreenRetryButtonBackgroundHover: '#dc2626',
-      retryScreenRetryButtonTitle: '#ffffff',
-      retryScreenRetryButtonTitleHover: '#ffffff',
+      fontSize: "14px",
+      onboardingScreenStartButtonTitle: "#ffffff",
+      onboardingScreenStartButtonBackground: "#7b61ff",         // <- corregido
+      onboardingScreenStartButtonBackgroundHover: "#6a54ee",
+      onboardingScreenStartButtonTitleHover: "#ffffff",
+      cameraScreenFrontHintLabelBackground: "#111827",
+      cameraScreenFrontHintLabelText: "#ffffff",
+      cameraScreenStrokeNormal: "#7b61ff",
+      cameraScreenSectorActive: "#22c55e",
+      cameraScreenSectorTarget: "#93c5fd",
+      processingScreenProgress: "#7b61ff",
+      retryScreenRetryButtonBackground: "#ef4444",
+      retryScreenRetryButtonBackgroundHover: "#dc2626",
+      retryScreenRetryButtonTitle: "#ffffff",
+      retryScreenRetryButtonTitleHover: "#ffffff",
     };
-  
+
     const cap = capRef.current;
     const liv = livRef.current;
-  
-    const onCap = (e) => console.log("[face-capture]", e.detail);
+
+    const onCap = async (e) => {
+      console.log("[face-capture]", e.detail);
+      // Si quieres enviar la selfie a tu backend:
+      // const dataUrl = e.detail?.data?.response?.image?.dataUrl
+      //               || e.detail?.data?.response?.bestFrame?.dataUrl;
+      // if (dataUrl) {
+      //   await fetch("http://localhost:4000/api/face/detect", {
+      //     method: "POST",
+      //     headers: { "Content-Type": "application/json" },
+      //     body: JSON.stringify({ imageBase64: dataUrl }),
+      //   });
+      // }
+    };
+
     const onLiv = (e) => console.log("[face-liveness]", e.detail);
-  
+
     (async () => {
       if (modo === "selfie" && cap) {
-        await ensureDefined("face-capture");     // 👈 evita carrera
+        await ensureDefined("face-capture");
         cap.settings = {
           startScreen: true,
           finishScreen: true,
+          locale: "es",
           customization: theme,
         };
         cap.addEventListener("face-capture", onCap);
       }
-  
+
       if (modo === "liveness" && liv) {
-        await ensureDefined("face-liveness");    // 👈 evita carrera
+        await ensureDefined("face-liveness");
         liv.settings = {
           startScreen: true,
           finishScreen: true,
-          livenessType: 1,          // pasivo (requiere backend para análisis real)
+          livenessType: 1, // 0=activo (gestos), 1=pasivo (recomendado con backend)
+          locale: "es",
+          recordingProcess: 2,
+          // Si ya tienes backend proxy para Face, puedes apuntar aquí:
+          url: "http://localhost:4000/api/face/liveness",
+          // headers: { Authorization: "Bearer <token>" },
           timeout: 15000,
           moveCloserTime: 4000,
           holdStillDuration: 4,
           headMovementTimeout: 5000,
-          recordingProcess: 2,
           customization: theme,
         };
         liv.addEventListener("face-liveness", onLiv);
       }
     })();
-  
+
     return () => {
       cap?.removeEventListener("face-capture", onCap);
       liv?.removeEventListener("face-liveness", onLiv);
     };
   }, [modo]);
-  
 
   return (
-    <div style={{ maxWidth: 600, margin: "0 auto", padding: 20 }}>
-      <h1 style={{ marginBottom: 20 }}>Regula Face SDK • Demo</h1>
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: 20 }}>
+      <h1 style={{ marginBottom: 20 }}>Regula • Demo</h1>
 
-      {/* ✅ Botones que muestran cuál está activo */}
-      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
         <button
           onClick={() => setModo("selfie")}
           style={{
             padding: "10px 15px",
-            borderRadius: "6px",
+            borderRadius: 6,
             border: "none",
             cursor: "pointer",
             backgroundColor: modo === "selfie" ? "#7b61ff" : "#e0e0e0",
             color: modo === "selfie" ? "#fff" : "#000",
-            fontWeight: modo === "selfie" ? "bold" : "normal"
+            fontWeight: modo === "selfie" ? "bold" : "normal",
           }}
         >
           Selfie (Foto)
@@ -98,12 +115,12 @@ export default function App() {
           onClick={() => setModo("liveness")}
           style={{
             padding: "10px 15px",
-            borderRadius: "6px",
+            borderRadius: 6,
             border: "none",
             cursor: "pointer",
             backgroundColor: modo === "liveness" ? "#7b61ff" : "#e0e0e0",
             color: modo === "liveness" ? "#fff" : "#000",
-            fontWeight: modo === "liveness" ? "bold" : "normal"
+            fontWeight: modo === "liveness" ? "bold" : "normal",
           }}
         >
           Liveness (Vida)
@@ -113,54 +130,37 @@ export default function App() {
           onClick={() => setModo("document")}
           style={{
             padding: "10px 15px",
-            backgroundColor: modo === "document" ? "#7b61ff" : "#ddd",
-            color: modo === "document" ? "#fff" : "#000",
             borderRadius: 6,
             border: "none",
-            cursor: "pointer"
+            cursor: "pointer",
+            backgroundColor: modo === "document" ? "#7b61ff" : "#e0e0e0",
+            color: modo === "document" ? "#fff" : "#000",
+            fontWeight: modo === "document" ? "bold" : "normal",
           }}
         >
           Documento (ID / Pasaporte)
         </button>
-
-        
       </div>
 
-      {/* ✅ Texto para indicar qué proceso vas a realizar */}
-      <p style={{ fontSize: "16px", fontWeight: "500", marginBottom: "20px" }}>
+      {/* Descripción */}
+      <p style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>
         {modo === "selfie"
-          ? "📸 Modo Selfie: solo captura de cara."
-          : "🧠 Modo Liveness: detecta si la persona está viva (movimiento real)."}
+          ? "📸 Modo Selfie: captura de rostro; tú decides si enviar la imagen a tu backend."
+          : modo === "liveness"
+          ? "🧠 Modo Liveness: usa pasivo (o activo) y puede apuntar a tu Face API."
+          : "📄 Documento: escaneo real via WebClient contra tu Document Reader API (por backend proxy)."}
       </p>
 
-      {/* ✅ Mostrar solo uno de los componentes */}
+      {/* Render según modo */}
       {modo === "selfie" && (
-        <face-capture
-          ref={capRef}
-          style={{ display: "block", minHeight: 520 }}
-        />
+        <face-capture ref={capRef} style={{ display: "block", minHeight: 520 }} />
       )}
 
       {modo === "liveness" && (
-        <face-liveness
-          ref={livRef}
-          style={{ display: "block", minHeight: 520 }}
-        />
+        <face-liveness ref={livRef} style={{ display: "block", minHeight: 520 }} />
       )}
-      {modo === "document" && (
-  <div style={{ padding: 20 }}>
-    <h2>📄 Captura de documento (próximamente)</h2>
-    <p>
-      Para activar esta función, necesitamos conectar con <b>Regula Document Reader SDK</b><br/>
-      que requiere una <b>licencia válida</b> y un backend.
-    </p>
-    <p style={{ opacity: 0.5 }}>
-      👉 En cuanto tengas la licencia, habilitamos cámara, escaneo de DNI/pasaporte
-      y extracción de datos automáticamente.
-    </p>
-  </div>
-)}
 
+      {modo === "document" && <DocReaderComponent />}
     </div>
   );
 }
