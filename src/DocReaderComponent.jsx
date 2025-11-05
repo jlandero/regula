@@ -1,6 +1,8 @@
+// DocReaderComponent.jsx — fijado a WebClient UMD 8.3.537
 import { useEffect, useRef, useState } from "react";
 
 const DOC_BACKEND_URL = "http://localhost:4000/api/doc"; // tu backend proxy
+const UMD_CDN = "https://cdn.jsdelivr.net/npm/@regulaforensics/document-reader-webclient@8.3.537/dist/webclient.umd.js";
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -13,98 +15,6 @@ function loadScript(src) {
   });
 }
 
-// Busca recursivamente funciones con esos nombres dentro de un objeto (por si cambian de nivel)
-function deepFindAPIMethods(obj) {
-  const seen = new Set();
-  function walk(o, path = []) {
-    if (!o || typeof o !== "object" || seen.has(o)) return null;
-    seen.add(o);
-    const hasInit = typeof o.initialize === "function";
-    const hasStart = typeof o.startScanner === "function" || typeof o.startScan === "function";
-    if (hasInit && hasStart) {
-      return {
-        initialize: o.initialize,
-        startScanner: o.startScanner || o.startScan, // soporta ambos nombres
-        sourcePath: path.join(".") || "(root)",
-      };
-    }
-    for (const k of Object.keys(o)) {
-      const sub = o[k];
-      const found = walk(sub, path.concat(k));
-      if (found) return found;
-    }
-    return null;
-  }
-  return walk(obj);
-}
-
-async function resolveWebClient() {
-  // 1) Paquete principal (ESM)
-  try {
-    const mod = await import("@regulaforensics/document-reader-webclient");
-    console.log("[DocReader] ESM main keys:", Object.keys(mod || {}));
-    // Intenta: named, default, o en objetos anidados
-    const candidates = [
-      { label: "named root", obj: mod },
-      { label: "default", obj: mod?.default },
-    ];
-    for (const c of candidates) {
-      const api = deepFindAPIMethods(c.obj);
-      if (api) {
-        console.log("[DocReader] API encontrada en", c.label, "→", api.sourcePath);
-        return { initialize: api.initialize, startScanner: api.startScanner };
-      }
-    }
-  } catch (e) {
-    console.warn("[DocReader] fallo import ESM main:", e?.message || e);
-  }
-
-  // 2) Ruta alternativa del paquete
-  try {
-    const mod = await import("@regulaforensics/document-reader-webclient/dist/webclient.js");
-    console.log("[DocReader] ESM dist keys:", Object.keys(mod || {}));
-    const candidates = [
-      { label: "dist root", obj: mod },
-      { label: "dist default", obj: mod?.default },
-    ];
-    for (const c of candidates) {
-      const api = deepFindAPIMethods(c.obj);
-      if (api) {
-        console.log("[DocReader] API encontrada en", c.label, "→", api.sourcePath);
-        return { initialize: api.initialize, startScanner: api.startScanner };
-      }
-    }
-  } catch (e) {
-    console.warn("[DocReader] fallo import dist/webclient.js:", e?.message || e);
-  }
-
-  // 3) UMD por CDN (global)
-  try {
-    const CDN = "https://cdn.jsdelivr.net/npm/@regulaforensics/document-reader-webclient/dist/webclient.umd.js";
-    await loadScript(CDN);
-    const globals = [
-      { label: "window.DocumentReader", obj: window.DocumentReader },
-      { label: "window.RegulaDocumentReader", obj: window.RegulaDocumentReader },
-      { label: "window.Regula?.DocumentReader", obj: window.Regula?.DocumentReader },
-    ];
-    for (const g of globals) {
-      if (!g.obj) continue;
-      const api = deepFindAPIMethods(g.obj);
-      if (api) {
-        console.log("[DocReader] API encontrada en global", g.label, "→", api.sourcePath);
-        return { initialize: api.initialize, startScanner: api.startScanner };
-      }
-    }
-  } catch (e) {
-    console.warn("[DocReader] fallo carga UMD:", e?.message || e);
-  }
-
-  throw new Error(
-    "No encontré initialize/startScanner en el WebClient (ESM/UMD). " +
-    "Revisa la versión instalada o usa la UMD del CDN."
-  );
-}
-
 export default function DocReaderComponent() {
   const apiRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -115,13 +25,39 @@ export default function DocReaderComponent() {
   useEffect(() => {
     (async () => {
       try {
-        const api = await resolveWebClient();
+        // 1) Cargar UMD pinneado a 8.3.537
+        await loadScript(UMD_CDN);
+
+        // 2) Localizar el global que expone initialize/startScanner
+        // (en 8.3.x suele ser window.DocumentReader o window.RegulaDocumentReader)
+        const candidates = [
+          window.DocumentReader,
+          window.RegulaDocumentReader,
+          window.Regula?.DocumentReader,
+        ].filter(Boolean);
+
+        let api = null;
+        for (const c of candidates) {
+          if (!c) continue;
+          const init = typeof c.initialize === "function" ? c.initialize : null;
+          const start = typeof c.startScanner === "function" ? c.startScanner
+                      : typeof c.startScan === "function" ? c.startScan
+                      : null;
+          if (init && start) {
+            api = { initialize: init, startScanner: start };
+            break;
+          }
+        }
+
+        if (!api) {
+          throw new Error("No encontré initialize/startScanner en el global del UMD 8.3.537");
+        }
         apiRef.current = api;
 
-        // Inicializa apuntando a TU backend proxy (la licencia vive en DocReader API)
+        // 3) Inicializar apuntando a tu backend proxy (la licencia vive en DocReader API)
         await api.initialize({
           url: DOC_BACKEND_URL,
-          // locale: "es", // si tu versión lo soporta aquí
+          // locale: "es" // si tu build lo soporta aquí
         });
 
         setReady(true);
@@ -139,7 +75,7 @@ export default function DocReaderComponent() {
       setError("");
 
       const resp = await apiRef.current.startScanner({
-        scenario: "MrzAndLocate", // "FullProcess" si quieres lectura completa
+        scenario: "MrzAndLocate", // o "FullProcess" para lectura completa
       });
 
       console.log("DocReader response:", resp);
@@ -158,8 +94,7 @@ export default function DocReaderComponent() {
         <h2>Documento de identidad</h2>
         <p style={{ color: "#b00" }}>Error: {error}</p>
         <p style={{ opacity: 0.7 }}>
-          Verifica que el backend proxy esté activo en <code>{DOC_BACKEND_URL}</code> y que la{" "}
-          <b>Document Reader API</b> tenga licencia válida.
+          Verifica que el backend proxy esté activo en <code>{DOC_BACKEND_URL}</code> y que la <b>Document Reader API</b> tenga licencia válida.
         </p>
       </div>
     );
