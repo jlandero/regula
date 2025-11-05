@@ -2,8 +2,82 @@ import { useEffect, useRef, useState } from "react";
 
 const DOC_BACKEND_URL = "http://localhost:4000/api/doc"; // tu backend proxy
 
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const exists = document.querySelector(`script[src="${src}"]`);
+    if (exists) return resolve();
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+async function resolveWebClient() {
+  // 1) Main entry
+  try {
+    const mod = await import("@regulaforensics/document-reader-webclient");
+    const api = pickAPI(mod);
+    if (api) return api;
+    console.warn("[DocReader] main entry no expone initialize/startScanner. Keys:", Object.keys(mod || {}));
+  } catch (e) {
+    console.warn("[DocReader] fallo import main:", e?.message || e);
+  }
+
+  // 2) Dist path
+  try {
+    const mod = await import("@regulaforensics/document-reader-webclient/dist/webclient.js");
+    const api = pickAPI(mod);
+    if (api) return api;
+    console.warn("[DocReader] dist/webclient.js sin initialize/startScanner. Keys:", Object.keys(mod || {}));
+  } catch (e) {
+    console.warn("[DocReader] fallo import dist/webclient.js:", e?.message || e);
+  }
+
+  // 3) CDN global
+  try {
+    const CDN = "https://cdn.jsdelivr.net/npm/@regulaforensics/document-reader-webclient/dist/webclient.js";
+    await loadScript(CDN);
+    // posibles nombres globales
+    const candidates = [
+      window.DocumentReader,
+      window.RegulaDocumentReader,
+      window.Regula?.DocumentReader,
+    ].filter(Boolean);
+
+    for (const cand of candidates) {
+      const api = pickAPI(cand);
+      if (api) return api;
+    }
+    console.warn("[DocReader] global no encontrado; window keys:", Object.keys(window));
+  } catch (e) {
+    console.warn("[DocReader] fallo carga CDN:", e?.message || e);
+  }
+
+  throw new Error("No encontré la API del WebClient (initialize/startScanner). Revisa la versión instalada.");
+}
+
+// Detecta distintas formas de export
+function pickAPI(mod) {
+  if (!mod) return null;
+  // export nombrado
+  if (typeof mod.initialize === "function" && typeof mod.startScanner === "function") {
+    return { initialize: mod.initialize, startScanner: mod.startScanner };
+  }
+  // default con métodos
+  if (mod.default && typeof mod.default.initialize === "function" && typeof mod.default.startScanner === "function") {
+    return { initialize: mod.default.initialize, startScanner: mod.default.startScanner };
+  }
+  // objeto con otro nombre común
+  if (mod.DocumentReader && typeof mod.DocumentReader.initialize === "function" && typeof mod.DocumentReader.startScanner === "function") {
+    return { initialize: mod.DocumentReader.initialize, startScanner: mod.DocumentReader.startScanner };
+  }
+  return null;
+}
+
 export default function DocReaderComponent() {
-  const apiRef = useRef({ initialize: null, startScanner: null });
+  const apiRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
@@ -12,28 +86,13 @@ export default function DocReaderComponent() {
   useEffect(() => {
     (async () => {
       try {
-        // Carga dinámica para evitar problemas de SSR/bundling
-        const mod = await import("@regulaforensics/document-reader-webclient");
-
-        // Compatibilidad: nombrados o default
-        const initialize =
-          mod?.initialize || mod?.default?.initialize || null;
-        const startScanner =
-          mod?.startScanner || mod?.default?.startScanner || null;
-
-        if (!initialize || !startScanner) {
-          console.error("WebClient module shape:", mod);
-          throw new Error(
-            "El WebClient no expone initialize/startScanner (ver consola)."
-          );
-        }
-
-        apiRef.current = { initialize, startScanner };
+        const api = await resolveWebClient();
+        apiRef.current = api;
 
         // Inicializa apuntando a TU backend proxy (la licencia vive en el DocReader API)
-        await initialize({
+        await api.initialize({
           url: DOC_BACKEND_URL,
-          // locale: "es", // si tu versión lo admite aquí
+          // locale: "es",  // si tu versión lo soporta aquí
         });
 
         setReady(true);
@@ -50,9 +109,8 @@ export default function DocReaderComponent() {
       setResult(null);
       setError("");
 
-      const { startScanner } = apiRef.current;
-      const resp = await startScanner({
-        scenario: "MrzAndLocate", // o "FullProcess", "Mrz", "Barcode", etc.
+      const resp = await apiRef.current.startScanner({
+        scenario: "MrzAndLocate", // "FullProcess" si quieres lectura completa
       });
 
       console.log("DocReader response:", resp);
@@ -71,9 +129,7 @@ export default function DocReaderComponent() {
         <h2>Documento de identidad</h2>
         <p style={{ color: "#b00" }}>Error: {error}</p>
         <p style={{ opacity: 0.7 }}>
-          Verifica que el backend proxy esté activo en{" "}
-          <code>{DOC_BACKEND_URL}</code> y que la <b>Document Reader API</b>{" "}
-          tenga licencia válida.
+          Revisa que el backend proxy esté activo en <code>{DOC_BACKEND_URL}</code> y que tu <b>Document Reader API</b> tenga licencia válida.
         </p>
       </div>
     );
